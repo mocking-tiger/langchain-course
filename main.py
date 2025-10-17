@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 from langchain_core.prompts import PromptTemplate  # 프롬프트 템플릿 생성
 from langchain_openai import ChatOpenAI  # OpenAI 모델 사용
+from langchain_ollama import ChatOllama  # Ollama 모델 사용
 
 load_dotenv()
 
@@ -27,7 +28,8 @@ def main():
 
     summary_prompt_template = PromptTemplate(template=summary_template, input_variables=["information"])
 
-    llm = ChatOpenAI(model="gpt-5", temperature=0)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    # llm = ChatOllama(model="gemma3:270m", temperature=0)
 
     chain = summary_prompt_template | llm
 

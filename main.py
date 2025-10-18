@@ -42,11 +42,17 @@ agent = create_react_agent(
 # 에이전트 실행자
 agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
+# RunnableLambda를 사용하여 출력 추출
+extract_output = RunnableLambda(lambda x: x["output"])
+parse_output = RunnableLambda(lambda x: output_parser.parse(x))
+
+chain = agent_executor | extract_output | parse_output
+
 
 def main():
     print("main함수를 실행합니다.")
 
-    result = agent_executor.invoke(
+    result = chain.invoke(
         {
             "input": "langchain을 사용하여 서울 지역의 linkedin의 프론트엔드 개발자 채용 공고 3개를 검색하고 세부정보를 나열해라."
         }

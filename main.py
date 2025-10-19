@@ -17,20 +17,24 @@ from schemas import AgentResponse
 # tavily에서 만든 검색 툴
 tools = [TavilySearch()]
 
-# llm 모델 사용
-llm = ChatOpenAI(model="gpt-4", temperature=0)  # llm 모델 사용
+# llm 모델 사용(gpt-5는 stop인수를 지원하지 않음)
+llm = ChatOpenAI(
+    model="gpt-4", temperature=0
+)
+structured_llm = llm.with_structured_output(AgentResponse)
 
 # react 프롬프트 사용
 react_prompt = hub.pull("hwchase17/react")
 
 # 출력 파서 생성
-output_parser = PydanticOutputParser(pydantic_object=AgentResponse)
+# output_parser = PydanticOutputParser(pydantic_object=AgentResponse)
 
 # 프롬프트 템플릿 생성
 react_prompt_with_format_instructions = PromptTemplate(
     template=REACT_PROMPT_WITH_FORMAT_INSTRUCTIONS,
-    input_variables=["input", "agent_scratchpad","tool_names"]
-).partial(format_instructions=output_parser.get_format_instructions())
+    input_variables=["input", "agent_scratchpad", "tool_names"],
+# ).partial(format_instructions=output_parser.get_format_instructions())
+).partial(format_instructions='')
 
 # react 에이전트 생성
 agent = create_react_agent(
@@ -44,9 +48,9 @@ agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
 # RunnableLambda를 사용하여 출력 추출
 extract_output = RunnableLambda(lambda x: x["output"])
-parse_output = RunnableLambda(lambda x: output_parser.parse(x))
+# parse_output = RunnableLambda(lambda x: output_parser.parse(x))
 
-chain = agent_executor | extract_output | parse_output
+chain = agent_executor | extract_output | structured_llm
 
 
 def main():

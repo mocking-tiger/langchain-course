@@ -6,6 +6,8 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.tools import tool, render_text_description, Tool
 from langchain_openai import ChatOpenAI
 from langchain.agents.format_scratchpad import format_log_to_str
+
+from callbacks import AgentCallbackHandler
 load_dotenv()
 
 @tool  # tool 데코레이터를 사용하여 도구로 등록
@@ -55,7 +57,7 @@ if __name__ == "__main__":
     )
 
     # LLM 설정 (Observation이 나오면 멈춤)
-    llm = ChatOpenAI(temperature=0, stop=["\nObservation","Observation"])
+    llm = ChatOpenAI(temperature=0, stop=["\nObservation","Observation"], callbacks=[AgentCallbackHandler()])
 
     intermediate_steps = []
 

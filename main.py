@@ -6,7 +6,11 @@ from langchain_pinecone import PineconeVectorStore  # Pinecone 벡터 데이터�
 from langchain import hub  # LangChain Hub에서 미리 만들어진 프롬프트를 가져오는 모듈
 from langchain.chains.combine_documents import create_stuff_documents_chain  # 검색된 문서들과 프롬프트를 결합하여 LLM 체인을 만드는 함수
 from langchain.chains.retrieval import create_retrieval_chain  # 벡터 DB 검색과 LLM 응답을 연결하는 RAG 체인을 만드는 함수
+from langchain_core.runnables import RunnablePassthrough
 load_dotenv()  # .env 파일의 환경변수들을 os.environ에 로드
+
+def format_docs(docs):
+    return "\n\n".join([doc.page_content for doc in docs])
 
 def main():
     print("main 함수 실행")
@@ -25,7 +29,25 @@ def main():
     combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)  # 검색된 문서들을 프롬프트에 결합하여 LLM에 전달하는 체인 생성
     retrival_chain = create_retrieval_chain(vectorstore.as_retriever(), combine_docs_chain=combine_docs_chain)  # 벡터 DB 검색 + 문서 결합 + LLM 응답을 하나의 RAG 체인으로 연결
     result = retrival_chain.invoke(input={"input": query})  # RAG 체인 실행: 질문과 유사한 문서 검색 후 LLM이 답변 생성
-    print(result)  # RAG 결과 출력 (검색된 문서 정보와 최종 답변 포함)
+    # print(result)  # RAG 결과 출력 (검색된 문서 정보와 최종 답변 포함)
+
+    template = """
+    Use the following pieces of context to answer the question at the end.
+    If you don't know the answer, just say that you don't know. Don't try to make up an answer.
+    Use three sentences maximum and keep the answer as concise as possible.
+    Always say "thanks for asking!" at the end of the answer.
+
+    {context}
+
+    Question: {question}
+
+    Helpful Answer:
+    """
+
+    custom_rag_prompt = PromptTemplate.from_template(template=template)
+    rag_chain = {"context": vectorstore.as_retriever() | format_docs, "question": RunnablePassthrough()} | custom_rag_prompt | llm
+    res = rag_chain.invoke(query)
+    print(res)
 
 if __name__ == "__main__":  # 이 파일이 직접 실행될 때만 아래 코드 실행
     main()  # main 함수 호출

@@ -1,53 +1,33 @@
-import os  # 환경변수 접근을 위한 모듈
 from dotenv import load_dotenv  # .env 파일에서 환경변수를 로드하는 모듈
-from langchain_core.prompts import PromptTemplate  # 프롬프트 템플릿을 생성하는 클래스
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings  # OpenAI의 LLM과 임베딩 모델
-from langchain_pinecone import PineconeVectorStore  # Pinecone 벡터 데이터베이스 연동 클래스
-from langchain import hub  # LangChain Hub에서 미리 만들어진 프롬프트를 가져오는 모듈
-from langchain.chains.combine_documents import create_stuff_documents_chain  # 검색된 문서들과 프롬프트를 결합하여 LLM 체인을 만드는 함수
-from langchain.chains.retrieval import create_retrieval_chain  # 벡터 DB 검색과 LLM 응답을 연결하는 RAG 체인을 만드는 함수
-from langchain_core.runnables import RunnablePassthrough
+from langchain_community.document_loaders import PyPDFLoader  # PDF 파일을 읽어 Document 객체로 변환하는 로더
+from langchain_text_splitters import CharacterTextSplitter  # 문서를 작은 청크(chunk)로 분할하는 스플리터
+from langchain_openai import OpenAIEmbeddings, OpenAI  # OpenAI의 임베딩 모델과 LLM
+from langchain_community.vectorstores import FAISS  # 로컬에서 사용 가능한 벡터 데이터베이스 (Facebook AI Similarity Search)
+from langchain.chains.retrieval import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain import hub
 load_dotenv()  # .env 파일의 환경변수들을 os.environ에 로드
-
-def format_docs(docs):
-    return "\n\n".join([doc.page_content for doc in docs])
 
 def main():
     print("main 함수 실행")
+    pdf_path = './startup-bible.pdf'  # 로드할 PDF 파일의 경로 지정
+    loader = PyPDFLoader(file_path=pdf_path)  # PDF 로더 초기화
+    documents = loader.load()  # PDF 파일을 읽어서 Document 객체 리스트로 변환 (각 페이지가 하나의 Document)
+    text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=20, separator="\n")  # 텍스트 스플리터 설정 (최대 1000자, 청크 간 20자 중복, 줄바꿈으로 구분)
+    docs = text_splitter.split_documents(documents)  # Document 리스트를 더 작은 청크들로 분할 (벡터 DB 저장 및 검색 효율성을 위해)
+    # print(docs)  # 분할된 청크들 출력
 
     embeddings = OpenAIEmbeddings()  # OpenAI 임베딩 모델 초기화 (텍스트를 벡터로 변환)
-    llm = ChatOpenAI()  # OpenAI LLM 초기화 (기본 모델: gpt-3.5-turbo)
+    vectorstore = FAISS.from_documents(docs, embeddings)  # 분할된 문서들을 임베딩하여 FAISS 벡터 DB에 저장
+    vectorstore.save_local("faiss_index_react")  # 생성된 벡터 DB를 로컬 디스크에 저장 (faiss_index_react 폴더에 저장됨)
 
-    query = "what is Pinecone in machine learning?"  # 질문 정의
-    chain = PromptTemplate.from_template(template=query) | llm  # 프롬프트 템플릿과 LLM을 파이프라인으로 연결
-    # result = chain.invoke(input={})  # LLM에게 질문 전달하여 일반적인 답변 생성 (RAG 없이)
-    # print(result.content)  # LLM의 응답 내용 출력
+    new_vectorstore = FAISS.load_local("faiss_index_react", embeddings, allow_dangerous_deserialization=True)  # 저장된 FAISS 벡터 DB를 로컬에서 불러오기 (allow_dangerous_deserialization은 pickle 역직렬화 허용)
 
-    vectorstore = PineconeVectorStore(index_name=os.environ['INDEX_NAME'], embedding=embeddings)  # Pinecone 벡터 DB 연결 (저장된 문서 임베딩에 접근)
+    retrieval_qa_chat_prompt = hub.pull("langchain-ai/retrieval-qa-chat")  # LangChain Hub에서 RAG용 QA 프롬프트 템플릿 가져오기
+    combine_docs_chain = create_stuff_documents_chain(OpenAI(), retrieval_qa_chat_prompt)  # 검색된 문서들을 프롬프트와 결합하여 LLM에 전달하는 체인 생성
+    retrieval_chain = create_retrieval_chain(new_vectorstore.as_retriever(), combine_docs_chain=combine_docs_chain)  # 벡터 DB 검색 + 문서 결합 + LLM 응답을 연결하는 RAG 체인 생성
+    res = retrieval_chain.invoke({"input": "고객획득비용이란 무엇인가요?"})  # RAG 체인 실행: 질문과 유사한 문서를 검색하고 LLM이 답변 생성
+    print(res["answer"])  # 생성된 답변 출력 (res는 dict 형태이며 "answer" 키에 최종 답변이 담김)
 
-    retrieval_qa_chat_prompt = hub.pull("langchain-ai/retrieval-qa-chat")  # LangChain Hub에서 RAG용 프롬프트 템플릿 가져오기
-    combine_docs_chain = create_stuff_documents_chain(llm, retrieval_qa_chat_prompt)  # 검색된 문서들을 프롬프트에 결합하여 LLM에 전달하는 체인 생성
-    retrival_chain = create_retrieval_chain(vectorstore.as_retriever(), combine_docs_chain=combine_docs_chain)  # 벡터 DB 검색 + 문서 결합 + LLM 응답을 하나의 RAG 체인으로 연결
-    result = retrival_chain.invoke(input={"input": query})  # RAG 체인 실행: 질문과 유사한 문서 검색 후 LLM이 답변 생성
-    # print(result)  # RAG 결과 출력 (검색된 문서 정보와 최종 답변 포함)
-
-    template = """
-    Use the following pieces of context to answer the question at the end.
-    If you don't know the answer, just say that you don't know. Don't try to make up an answer.
-    Use three sentences maximum and keep the answer as concise as possible.
-    Always say "thanks for asking!" at the end of the answer.
-
-    {context}
-
-    Question: {question}
-
-    Helpful Answer:
-    """
-
-    custom_rag_prompt = PromptTemplate.from_template(template=template)
-    rag_chain = {"context": vectorstore.as_retriever() | format_docs, "question": RunnablePassthrough()} | custom_rag_prompt | llm
-    res = rag_chain.invoke(query)
-    print(res)
-
-if __name__ == "__main__":  # 이 파일이 직접 실행될 때만 아래 코드 실행
-    main()  # main 함수 호출
+if __name__ == "__main__":  
+    main()
